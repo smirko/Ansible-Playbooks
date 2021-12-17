@@ -1,0 +1,155 @@
+- name: Install Prerequisites for RHEL7
+  yum:
+    name: ['sssd', 'realmd', 'oddjob', 'krb5-workstation', 'openldap-clients', 'oddjob-mkhomedir', 'adcli', 'samba-common', 'samba-common-tools', 'sssd-tools']
+    state: present
+  when:
+    - ansible_distribution_version | regex_search('^7')
+    - ansible_distribution | regex_search('^RedHat')
+- name: Install Prerequisites for RHEL8
+  yum:
+    name: ['sssd', 'realmd', 'oddjob', 'krb5-workstation', 'openldap-clients', 'oddjob-mkhomedir', 'adcli', 'samba-common', 'samba-common-tools', 'sssd-tools','authselect-compat']
+    state: present
+  when:
+    - ansible_distribution_version | regex_search('^8')
+    - ansible_distribution | regex_search('^RedHat')
+
+
+
+- name: Check if server is in AD
+  stat:
+    path: /etc/krb5.keytab
+  register: realmd_bound
+  changed_when: false
+  ignore_errors: true
+
+- name: Create User Keytab
+  shell: /bin/bash -c 'ktutil < <(echo "addent -password -p {{ adauth_username }} -k 1 -e RC4-HMAC";sleep 1;echo "{{ adauth_password_esc }}";echo "wkt /tmp/{{ adauth_username }}.keytab")'
+
+
+- name: Kinit using keytab
+  command: kinit {{ adauth_username }} -k -t /tmp/{{ adauth_username }}.keytab
+
+
+
+- name: Open Firewall Port
+  firewalld:
+    port:       "{{ item.port }}"
+    permanent:  true
+    state:      enabled
+    immediate:  true
+  with_items:
+    - {port: 111/tcp}
+    - {port: 2049/tcp}
+  notify:
+    - Restart Firewall
+  ignore_errors: true
+
+- debug: var=domain_full_lowercase
+- debug: var=ansible_domain
+
+- block:
+
+  - name: Detecting {{ ansible_domain }} IP
+    shell: host {{ ansible_domain }}|sed 's/^.*address //'
+    register: dcs_ip
+    changed_when: False
+
+  - debug: var=dcs_ip
+
+  - name: Creating variable with DC ip
+    set_fact:
+      dc_ip: '{{dcs_ip.stdout_lines[0]}}'
+
+  - debug: var=dc_ip
+
+  - name: Register Destination OU for EXTRANET
+    set_fact:
+      ad_destOU: "{{ EXTRANET_ad_destOU }}"
+    when:
+      - ansible_domain == "dmz.domain"
+
+  - name: Register Destination OU for EU
+    set_fact:
+      ad_destOU: "{{ EU_ad_destOU }}"
+    when:
+      - ansible_domain == "eu.domain"
+
+  - name: Register Destination OU for AM
+    set_fact:
+      ad_destOU: "{{ AM_ad_destOU }}"
+    when:
+      - ansible_domain == "am.domain"
+
+  - name: Register Destination OU for AP
+    set_fact:
+      ad_destOU: "{{ AP_ad_destOU }}"
+    when:
+      - ansible_domain == "ap.domain"
+
+  - debug: var=ad_destOU
+
+
+
+  - name: Join to Active Directory
+    command: /bin/bash -c "/sbin/adcli join --login-ccache --domain-ou={{ ad_destOU }} --domain={{ ansible_domain }} --host-fqdn={{ ansible_hostname }}.{{ ansible_domain }} ; /usr/sbin/authconfig --enablemkhomedir --enablesssd --enablesssdauth --update"
+    when: realmd_bound.stat.exists == False
+    register: realmd_join
+    become: true
+    ignore_errors: true
+
+
+  - name: Copy sssd.conf for extranet
+    template:
+      src: sssd-ext.conf.j2
+      dest: /etc/sssd/sssd.conf
+      owner: root
+      group: root
+      mode: 0600
+    when:
+      - realmd_bound.stat.exists == False
+      - ansible_domain == 'dmz.domain'
+
+  - name: Copy sssd.conf
+    template:
+      src: sssd.conf.j2
+      dest: /etc/sssd/sssd.conf
+      owner: root
+      group: root
+      mode: 0600
+    when:
+      - realmd_bound.stat.exists == False
+      - ansible_domain != 'dmz.domain'
+
+  - name: Restart service sssd
+    service:
+      name: sssd
+      state: restarted
+
+  - name: Install sudo include file for extranet
+    template:
+      src: domain-ext.j2
+      dest: /etc/sudoers.d/sudo_OPSadmins
+      owner: root
+      group: root
+      mode: 0640
+      validate: 'visudo -cf %s'
+    when:
+      - ansible_domain == 'dmz.domain'
+
+  - name: Install sudo include file
+    template:
+      src: domain.j2
+      dest: /etc/sudoers.d/sudo_OPSadmins
+      owner: root
+      group: root
+      mode: 0640
+      validate: 'visudo -cf %s'
+    when:
+      - ansible_domain != 'localdomain'
+      - ansible_domain != 'dmz.domain'
+
+
+- name: Delete keytab
+  file:
+    state: absent
+    path: /tmp/{{ adauth_username }}.keytab
