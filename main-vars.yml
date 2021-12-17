@@ -1,0 +1,11 @@
+# vars file for sta_adjoion
+domain_full_lowercase: "{{ ansible_domain }}"
+# It is important that krb5 domain is in ALL CAPITALS
+krb5_default_realm: "{{ domain_full_lowercase|upper }}"
+#Predefined OUs
+EU_ad_destOU: OU=Servers,DC=eu,DC=domain
+AM_ad_destOU: OU=Servers,DC=am,DC=domain
+AP_ad_destOU: OU=Servers,DC=ap,DC=domain
+EXTRANET_ad_destOU: OU=Servers,DC=dmz,DC=domain
+#OPS admin group access
+ad_sysadmin_group: datacenteradmins@root.domain
