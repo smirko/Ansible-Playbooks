@@ -1,0 +1,37 @@
+- name: check if example-pkg package is installed
+  command: rpm -q example-pkg warn=false
+  register: isinstalled
+  failed_when: isinstalled.rc > 1
+
+- name: install example-pkg package
+  yum:
+    state: present
+    name:
+      - example-pkg
+  when: isinstalled.rc == 1
+
+- name: Check and register Package
+  block:
+  - name: check if example-pkg package is installedNow
+    command: rpm -q example-pkg warn=false
+    register: isinstalledNow
+    failed_when:
+    - isinstalledNow.rc > 1
+
+  - name: Stop service example-pkg
+    service:
+      name: example-pkg
+      enabled: yes
+      state: stopped
+    when: isinstalledNow.rc == 0
+
+  - name:  register Arg
+    shell: /opt/packagectl -arg arg1
+    when: isinstalledNow.rc == 0
+
+  - name: Start service example-pkg
+    service:
+      name: example-pkg
+      state: started
+    when: isinstalledNow.rc == 0
+  when: isinstalled.rc == 1
