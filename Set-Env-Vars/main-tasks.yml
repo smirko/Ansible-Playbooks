@@ -1,0 +1,61 @@
+- name: Check for MT_SCCMEnvPatch
+  shell: /bin/bash -c ". /etc/profile && (env | grep [M]T_SCCMEnvPatch)"
+  register: mtenvp
+  changed_when: false
+  ignore_errors: true
+- name: Check for MT_SCCMEnvReboot
+  shell: /bin/bash -c ". /etc/profile && (env | grep [M]T_SCCMEnvReboot)"
+  register: mtenvr
+  changed_when: false
+  ignore_errors: true
+
+- name: Read the current Lifecycle Environment from Satellite
+  become_user:   ansible
+  become:        yes
+  local_action: command /bin/ssh ch00ssat1 "sudo /bin/hammer -u {{ adauth_username.split('@')[0] }} -p {{ adauth_password_esc }} host info --name {{ ansible_hostname|lower }}.{{ ansible_domain }} |/bin/sed '/Lifecycle Environment{{':'}}/,/Content Source{{':'}}/!d;/Name{{':'}}/!d;s/^.*Name{{':'}} //g'"
+  register: curle
+
+- debug: var=curle.stdout
+
+- name: Read the host group
+  become_user:   ansible
+  become:        yes
+  local_action: command /bin/ssh ch00ssat1 "sudo /bin/hammer -u {{ adauth_username.split('@')[0] }} -p {{ adauth_password_esc }} host info --name {{ ansible_hostname|lower }}.{{ ansible_domain }} |/bin/sed '/Host Group{{':'}}/!d;s/^.*{{':'}} *//g'"
+  register: hostgroup
+
+
+- name: Set the correct MT_SCCMEnvPatch variable
+  become_method: sudo
+  become_user:   root
+  become:        yes
+  lineinfile:
+    path: /etc/profile
+    regexp: '^export MT_SCCMEnvPatch='
+    state: present
+    line: export MT_SCCMEnvPatch={{ curle.stdout }}
+  when: '"export mtenvp.stdout" != "export MT_SCCMEnvPatch=curle.stdout"'
+- debug: var=curle.stdout
+
+- name: Set the MT_SCCMEnvReboot variable stage 1
+  become_method: sudo
+  become_user:   root
+  become:        yes
+  lineinfile:
+    path: /etc/profile
+    regexp: '^export MT_SCCMEnvReboot='
+    state: present
+    line: "export MT_SCCMEnvReboot=Auto"
+  when: hostgroup.stdout is search("autoreboot")
+
+- name: Set the MT_SCCMEnvReboot variable stage 2
+  become_method: sudo
+  become_user:   root
+  become:        yes
+  lineinfile:
+    path: /etc/profile
+    regexp: '^export MT_SCCMEnvReboot='
+    state: present
+    line: "export MT_SCCMEnvReboot=Manual"
+  when: '"autoreboot" not in hostgroup.stdout'
+
+
