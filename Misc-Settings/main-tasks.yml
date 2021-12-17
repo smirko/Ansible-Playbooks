@@ -1,0 +1,42 @@
+  - name: Disable CTRL+ALT+DEL reboot
+    shell: "/usr/bin/systemctl mask ctrl-alt-del.target"
+
+  - name: Set Kerberos legacy encryption to be able to communicate with MT Active Directory
+    lineinfile:
+      dest: '/etc/krb5.conf.d/crypto-policies'
+      regexp: '^permitted_enctypes'
+      line: '#permitted_enctypes = aes256-cts-hmac-sha1-96 aes256-cts-hmac-sha384-192 camellia256-cts-cmac aes128-cts-hmac-sha1-96 aes128-cts-hmac-sha256-128 camellia128-cts-cmac'
+      state: present
+    when:
+      - ansible_distribution_version | regex_search('^8')
+      - ansible_distribution | regex_search('^RedHat')
+
+  - name: Check that the NFS config definition file exists
+    stat:
+      path: /etc/sysconfig/nfs
+    register: nfs_result
+
+  - name: Change RPCNFSDARGS from NFSv3 to NFSv4
+    become_method: sudo
+    become_user:   root
+    become:        yes
+    lineinfile:
+      path: /etc/sysconfig/nfs
+      state: present
+      regexp: '^RPCNFSDARGS='
+      line: 'RPCNFSDARGS="-N2 -N3"'
+    when:
+      - nfs_result.stat.exists == true
+
+  - name: Change RPCMOUNTDOPTS
+    become_method: sudo
+    become_user:   root
+    become:        yes
+    lineinfile:
+      path: /etc/sysconfig/nfs
+      state: present
+      regexp: '^RPCMOUNTDOPTS='
+      line: 'RPCMOUNTDOPTS="-N 2 -N 3"'
+    when:
+      - nfs_result.stat.exists == true
+
