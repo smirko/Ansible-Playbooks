@@ -1,0 +1,39 @@
+- name: Test for right interface
+  shell: /usr/sbin/ip ro list match 172.16.0.0/12|sed "s/^.*dev \([a-z0-9]*\) .*/\1/g"|tail -1
+  register: int
+
+- name: Test for dmz
+  shell: /usr/sbin/ip r sh to 0/0 |grep "172.30.0"
+  ignore_errors: true
+  register: dmz
+
+- name: Ensure route file exists
+  become_method: sudo
+  become_user:   root
+  become:        yes
+  file:
+    path: /etc/sysconfig/network-scripts/route-{{ int.stdout }}
+    state: touch
+
+- name: Test for route already added
+  become_method: sudo
+  become_user:   root
+  become:        yes
+  ignore_errors: true
+  shell: cat /etc/sysconfig/network-scripts/route-{{ int.stdout }} | grep -c "172.16.0.0"
+  register: gw_grep
+  when: dmz.rc == 0
+
+- debug: var=dmz.rc
+- debug: var=gw_grep.stdout
+
+- name: Replace incorrect gateway
+  become_method: sudo
+  become_user:   root
+  become:        yes
+  ignore_errors: true
+  shell: nmcli c mod "System {{ int.stdout }}" ipv4.gateway "172.30.0.254";nmcli c mod "System {{ int.stdout }}" ipv4.routes "172.16.0.0/12 172.30.0.1";nmcli con down "System {{ int.stdout }}";nmcli con up "System {{ int.stdout }}"
+  when:
+    - gw_grep is defined
+    - gw_grep.stdout == "0"
+    - dmz.rc == 0
